@@ -53,7 +53,7 @@ rust_library {
     host_supported: true,
     apex_available: [
         "//apex_available:platform",
-        "com.android.bluetooth",
+        "com.android.btservices",
         "com.android.compos",
         "com.android.virt",
     ],
@@ -63,11 +63,12 @@ rust_library {
 cc_library_static {
     host_supported: true,
     name: "libcxxbridge05",
+    defaults: ["rust_static_cc_lib_defaults"],
     cflags: ["-DRUST_CXX_NO_EXCEPTIONS"],
     srcs: ["src/cxx.cc"],
     apex_available: [
         "//apex_available:platform",
-        "com.android.bluetooth",
+        "com.android.btservices",
         "com.android.compos",
         "com.android.virt",
     ],
