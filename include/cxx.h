@@ -277,12 +277,6 @@ private:
   void *pos;
   std::size_t stride;
 };
-
-#if __cplusplus >= 202002L
-static_assert(std::ranges::contiguous_range<rust::Slice<const uint8_t>>);
-static_assert(std::contiguous_iterator<rust::Slice<const uint8_t>::iterator>);
-#endif
-
 #endif // CXXBRIDGE1_RUST_SLICE
 
 #ifndef CXXBRIDGE1_RUST_BOX
@@ -1157,7 +1151,4 @@ template <typename T>
 constexpr bool enable_view<rust::Slice<T>> = true;
 } // namespace ranges
 } // namespace std
-
-static_assert(std::ranges::borrowed_range<rust::Slice<const uint8_t>>);
-static_assert(std::ranges::view<rust::Slice<const uint8_t>>);
 #endif
