@@ -267,7 +267,8 @@ fn validate_cfg(prj: &Project) -> Result<()> {
 
 fn make_this_crate(prj: &Project) -> Result<Crate> {
     let crate_dir = make_crate_dir(prj);
-    let include_dir = make_include_dir(prj)?;
+    let header = env::var_os("DEP_CXXBRIDGE1_HEADER");
+    let include_dir = make_include_dir(prj, header.as_deref())?;
 
     let mut this_crate = Crate {
         include_prefix: Some(prj.include_prefix.clone()),
@@ -380,16 +381,19 @@ fn make_crate_dir(prj: &Project) -> PathBuf {
     crate_dir
 }
 
-fn make_include_dir(prj: &Project) -> Result<PathBuf> {
+fn make_include_dir(prj: &Project, header: Option<&OsStr>) -> Result<PathBuf> {
     let include_dir = prj.out_dir.join("cxxbridge").join("include");
     let cxx_h = include_dir.join("rust").join("cxx.h");
     let ref shared_cxx_h = prj.shared_dir.join("rust").join("cxx.h");
-    if let Some(ref original) = env::var_os("DEP_CXXBRIDGE1_HEADER") {
+    if let Some(original) = header {
         out::absolute_symlink_file(original, cxx_h)?;
-        out::absolute_symlink_file(original, shared_cxx_h)?;
-    } else {
-        out::write(shared_cxx_h, bridge::include::HEADER.as_bytes())?;
+        let _ = out::absolute_symlink_file(original, shared_cxx_h);
+    } else if out::write(shared_cxx_h, bridge::include::HEADER.as_bytes()).is_ok() {
         out::relative_symlink_file(shared_cxx_h, cxx_h)?;
+    } else {
+        // The shared directory is only a debugging convenience and may not be
+        // writable, for example when the build script runs in a sandbox.
+        out::write(cxx_h, bridge::include::HEADER.as_bytes())?;
     }
     Ok(include_dir)
 }
@@ -475,4 +479,88 @@ fn best_effort_copy_headers(src: &Path, dst: &Path, max_depth: usize) {
 fn env_os(key: impl AsRef<OsStr>) -> Result<OsString> {
     let key = key.as_ref();
     env::var_os(key).ok_or_else(|| Error::NoEnv(key.to_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Project, bridge, make_include_dir};
+    use std::fs;
+    use std::path::Path;
+
+    fn project(root: &Path) -> Project {
+        Project {
+            include_prefix: "test".into(),
+            manifest_dir: root.to_owned(),
+            links_attribute: None,
+            out_dir: root.join("out"),
+            shared_dir: root.join("shared"),
+        }
+    }
+
+    #[test]
+    fn include_dir_without_shared_dir() {
+        check_include_dir_without_shared_dir(false);
+    }
+
+    #[test]
+    fn dependency_header_without_shared_dir() {
+        check_include_dir_without_shared_dir(true);
+    }
+
+    fn check_include_dir_without_shared_dir(dependency_header: bool) {
+        let temp = tempfile::tempdir().unwrap();
+        let prj = project(temp.path());
+        // A file blocking the directory fails even when running as root.
+        fs::write(&prj.shared_dir, b"blocked").unwrap();
+        let original = temp.path().join("original.h");
+        fs::write(&original, b"dependency header").unwrap();
+        let header = dependency_header.then_some(original.as_os_str());
+
+        let include_dir = make_include_dir(&prj, header).unwrap();
+        let expected = if dependency_header {
+            b"dependency header".as_slice()
+        } else {
+            bridge::include::HEADER.as_bytes()
+        };
+        assert_eq!(fs::read(include_dir.join("rust/cxx.h")).unwrap(), expected);
+        assert_eq!(fs::read(&prj.shared_dir).unwrap(), b"blocked");
+    }
+
+    #[test]
+    fn include_dir_with_shared_dir() {
+        for dependency_header in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let prj = project(temp.path());
+            let original = temp.path().join("original.h");
+            fs::write(&original, b"dependency header").unwrap();
+            let header = dependency_header.then_some(original.as_os_str());
+
+            let include_dir = make_include_dir(&prj, header).unwrap();
+            let expected = if dependency_header {
+                b"dependency header".as_slice()
+            } else {
+                bridge::include::HEADER.as_bytes()
+            };
+            assert_eq!(fs::read(include_dir.join("rust/cxx.h")).unwrap(), expected);
+            assert_eq!(
+                fs::read(prj.shared_dir.join("rust/cxx.h")).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn include_dir_requires_out_dir() {
+        for dependency_header in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let prj = project(temp.path());
+            fs::write(&prj.out_dir, b"blocked").unwrap();
+            let original = temp.path().join("original.h");
+            fs::write(&original, b"dependency header").unwrap();
+            let header = dependency_header.then_some(original.as_os_str());
+
+            assert!(make_include_dir(&prj, header).is_err());
+            assert_eq!(fs::read(&prj.out_dir).unwrap(), b"blocked");
+        }
+    }
 }
