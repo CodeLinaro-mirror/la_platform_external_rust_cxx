@@ -267,8 +267,7 @@ fn validate_cfg(prj: &Project) -> Result<()> {
 
 fn make_this_crate(prj: &Project) -> Result<Crate> {
     let crate_dir = make_crate_dir(prj);
-    let header = env::var_os("DEP_CXXBRIDGE1_HEADER");
-    let include_dir = make_include_dir(prj, header.as_deref())?;
+    let include_dir = make_include_dir(prj)?;
 
     let mut this_crate = Crate {
         include_prefix: Some(prj.include_prefix.clone()),
@@ -381,13 +380,13 @@ fn make_crate_dir(prj: &Project) -> PathBuf {
     crate_dir
 }
 
-fn make_include_dir(prj: &Project, header: Option<&OsStr>) -> Result<PathBuf> {
+fn make_include_dir(prj: &Project) -> Result<PathBuf> {
     let include_dir = prj.out_dir.join("cxxbridge").join("include");
     let cxx_h = include_dir.join("rust").join("cxx.h");
     let ref shared_cxx_h = prj.shared_dir.join("rust").join("cxx.h");
-    if let Some(original) = header {
-        out::absolute_symlink_file(original, cxx_h)?;
-        let _ = out::absolute_symlink_file(original, shared_cxx_h);
+    if let Some(original) = env::var_os("DEP_CXXBRIDGE1_HEADER") {
+        out::absolute_symlink_file(&original, cxx_h)?;
+        let _ = out::absolute_symlink_file(&original, shared_cxx_h);
     } else if out::write(shared_cxx_h, bridge::include::HEADER.as_bytes()).is_ok() {
         out::relative_symlink_file(shared_cxx_h, cxx_h)?;
     } else {
